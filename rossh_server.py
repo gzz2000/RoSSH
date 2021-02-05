@@ -106,7 +106,7 @@ class Session:
         os.close(master_fd)
         retv = os.waitpid(shell_pid, 0)[1]
 
-        sys.stdout.write('\r[RoSSH session] shell exited with status %d.\r\n' % retv)
+        # sys.stdout.write('\r[RoSSH session] shell exited with status %d.\r\n' % retv)
         sys.exit(0)
 
     def create_if_not_exists(self):

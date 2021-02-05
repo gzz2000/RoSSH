@@ -172,7 +172,7 @@ class ClientSession:
 
                             if data.find(b'\x1b+CONN:E') >= 0:
                                 write_to(stdout_fileno, data[:data.find(b'\x1b+CONN:E')])
-                                print('\r[RoSSH] Exited gracefully.\r')
+                                # print('\r[RoSSH] Exited gracefully.\r')
                                 return
 
                             write_to(stdout_fileno, data)
@@ -188,7 +188,7 @@ class ClientSession:
 
 if __name__ == '__main__':
     print(banner)
-    term_id = 'test' # gen_term_id()
+    term_id = gen_term_id()
     args = [*sys.argv]
     args[0] = 'ssh'
     sess = ClientSession(term_id, args)
