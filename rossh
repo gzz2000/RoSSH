@@ -1,0 +1,3 @@
+#!/bin/bash
+
+~/.rossh/rossh_client.py "$@"

@@ -66,7 +66,7 @@ class ClientSession:
                         write_to(stdout_fileno, data)
                         
                     if data.find(b'\x1b+CONN:FL:CLI') >= 0:
-                        print('[RoSSH] Copying RoSSH to remote server ~/.rossh ...')
+                        print('[RoSSH] Copying RoSSH to remote server ~/.rossh ...\r')
                         write_to(master_fd, b'mkdir -p ~/.rossh\n')
                         write_to(master_fd, b'chmod go-w ~/.rossh\n')
                         write_to(master_fd, b'cd ~/.rossh\n')
@@ -134,8 +134,17 @@ class ClientSession:
                     data = os.read(stdin_fileno, 1024)
                 if data == b'\x03':
                     if session_created:
-                        print('[RoSSH] The orphaned remote session would be killed the next time you log into this server from this client.')
-                    return
+                        print('[RoSSH] You will not be able to reconnect to this session. Proceed? (y/n)')
+                        with raw_tty():
+                            while True:
+                                data = os.read(stdin_fileno, 1024)
+                                if data in [b'y', b'n', b'Y', b'N']:
+                                    break
+                        if data in [b'y', b'Y']:
+                            print('[RoSSH] The orphaned remote session would be killed the next time you log into this server from this client.')
+                            return
+                    else:
+                        return
                 continue
 
             session_created = True

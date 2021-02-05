@@ -13,6 +13,7 @@ import argparse
 import signal
 import select
 import shutil
+import atexit
 
 from rossh_common import \
     build_ctlseq, \
@@ -32,7 +33,8 @@ class Session:
     def __init__(self, term_id):
         self.RoSSH_DIRNAME = 'rossh.%s' % term_id
         self.RoSSH_DIR = '/tmp/%s' % self.RoSSH_DIRNAME
-        self.RoSSH_PID_PATH = '%s/pid' % self.RoSSH_DIR
+        self.RoSSH_SESS_PID_PATH = '%s/session.pid' % self.RoSSH_DIR
+        self.RoSSH_CONN_PID_PATH = '%s/connection.pid' % self.RoSSH_DIR
         self.RoSSH_SOCK_PATH = '%s/auth.sock' % self.RoSSH_DIR
         self.RoSSH_INPUT_PIPE_PATH = '%s/input' % self.RoSSH_DIR
         self.RoSSH_OUTPUT_PIPE_PATH = '%s/output' % self.RoSSH_DIR
@@ -78,10 +80,13 @@ class Session:
         
         child_pid = os.fork()
         if child_pid != 0:
+            with open(self.RoSSH_SESS_PID_PATH, 'w') as f:
+                f.write(str(child_pid))
             return
         
         # below runs in the session daemon, and exits.
         signal.signal(signal.SIGHUP, signal.SIG_IGN)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
         if 'SSH_AUTH_SOCK' in os.environ:
             os.environ['SSH_AUTH_SOCK'] = self.RoSSH_SOCK_PATH
 
@@ -111,6 +116,23 @@ class Session:
         self.create_session_daemon()
 
     def attach(self):
+        if os.path.exists(self.RoSSH_CONN_PID_PATH):
+            # kill the previous connection.
+            with open(self.RoSSH_CONN_PID_PATH) as f:
+                old_pid = int(f.read())
+                
+            os.kill(old_pid, signal.SIGINT)    # different from SIGHUP to avoid file remove race condition
+
+        with open(self.RoSSH_CONN_PID_PATH, 'w') as f:
+            f.write(str(os.getpid()))
+
+        def onhup_delpid(signum, frame):
+            os.unlink(self.RoSSH_CONN_PID_PATH)
+            sys.stdout.write('\r[RoSSH conn] SIGHUP\r\n')
+            sys.exit(1)
+
+        signal.signal(signal.SIGHUP, onhup_delpid)
+        
         rssh_input = open(self.RoSSH_INPUT_PIPE_PATH, 'w')
         rssh_input_fileno = rssh_input.fileno()
         rssh_output = open(self.RoSSH_OUTPUT_PIPE_PATH, 'r')
