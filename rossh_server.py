@@ -1,22 +1,25 @@
 #!/usr/bin/env python3
 
 '''
-@file rssh_server.py
+@file rossh_server.py
 @author Zizheng Guo (https://github.com/gzz2000)
 @brief The code that would run on the remote server. It creates and manages shells behind pseudo terminals.
 '''
 
 import pty
-import tty
 import os
 import sys
 import argparse
 import signal
 import select
-import fcntl
-import termios
-import contextlib
 import shutil
+
+from rossh_common import \
+    build_ctlseq, \
+    write_to, \
+    write_to_master_fd, \
+    forward_window_resize, \
+    raw_tty
 
 SHELL = os.environ.get('SHELL', 'sh')
 
@@ -24,47 +27,6 @@ parser = argparse.ArgumentParser(
     description='RoSSH server script that creates and manages shells behind pseudo terminals.')
 parser.add_argument('-t', dest='term', type=str, required=True,
                     help='Terminal id to create or attach to')
-
-def build_ctlseq(*args):
-    ret = b'\x1b+'
-    for a in args:
-        ret += bytes(a)
-    return ret
-
-def write_to(fd, data):
-    while data:
-        n = os.write(fd, data)
-        data = data[n:]
-
-def write_to_master_fd(master_fd, data):
-    '''
-    Write all data to master_fd
-    Interpret our special control characters, currently only:
-    \x1b + WS <8 bytes struct winsize>: change window size
-    '''
-    if len(data) >= 12 and data[0:4] == b'\x1b+WS':
-        ws = data[4:12]
-        fcntl.ioctl(master_fd, termios.TIOCSWINSZ, ws)
-        data = data[12:]
-    while data:
-        n = os.write(master_fd, data)
-        data = data[n:]
-
-@contextlib.contextmanager
-def raw_tty():
-    STDIN_FILENO = sys.stdin.fileno()
-    try:
-        mode = tty.tcgetattr(STDIN_FILENO)
-        tty.setraw(STDIN_FILENO)
-        restore = 1
-    except tty.error:
-        restore = 0
-
-    try:
-        yield
-    finally:
-        if restore:
-            tty.tcsetattr(STDIN_FILENO, tty.TCSAFLUSH, mode)
 
 class Session:
     def __init__(self, term_id):
@@ -129,7 +91,6 @@ class Session:
 
         shell_pid, master_fd = pty.fork()
         if shell_pid == 0:
-            print(SHELL)
             os.execvp(SHELL, [SHELL])
 
         try:
@@ -140,7 +101,7 @@ class Session:
         os.close(master_fd)
         retv = os.waitpid(shell_pid, 0)[1]
 
-        sys.stdout.write('[RoSSH session] shell exited with status %d.\n' % retv)
+        sys.stdout.write('\r[RoSSH session] shell exited with status %d.\r\n' % retv)
         sys.exit(0)
 
     def create_if_not_exists(self):
@@ -156,18 +117,11 @@ class Session:
         rssh_output_fileno = rssh_output.fileno()
         stdin_fileno = sys.stdin.fileno()
         stdout_fileno = sys.stdout.fileno()
-
-        def resize_window():
-            window_size = fcntl.ioctl(stdin_fileno, termios.TIOCGWINSZ, '00000000')
-            os.write(rssh_input_fileno, build_ctlseq(b'WS', window_size))
-
-        signal.signal(signal.SIGWINCH, lambda signum, frame: resize_window())
-        resize_window()
         
         sys.stdout.write("[RoSSH conn] connected to session\n")
-        sys.stdout.write(build_ctlseq(b'CONN:S'))
+        write_to(stdout_fileno, build_ctlseq(b'CONN:S'))
 
-        with raw_tty():
+        with raw_tty(), forward_window_resize(rssh_input_fileno, indirect=True):
             fds = [stdin_fileno, rssh_output_fileno]
             
             while True:
@@ -192,8 +146,8 @@ class Session:
         # session terminated. cleanup.
         shutil.rmtree(self.RoSSH_DIR)
         
+        write_to(stdout_fileno, build_ctlseq(b'CONN:E'))
         sys.stdout.write("[RoSSH conn] session exited\n")
-        sys.stdout.write(build_ctlseq(b'CONN:E'))
 
 if __name__ == '__main__':
     args = parser.parse_args()
