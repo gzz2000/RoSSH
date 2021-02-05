@@ -21,7 +21,7 @@ import shutil
 SHELL = os.environ.get('SHELL', 'sh')
 
 parser = argparse.ArgumentParser(
-    description='RSSH server script that creates and manages shells behind pseudo terminals.')
+    description='RoSSH server script that creates and manages shells behind pseudo terminals.')
 parser.add_argument('-t', dest='term', type=str, required=True,
                     help='Terminal id to create or attach to')
 
@@ -68,17 +68,17 @@ def raw_tty():
 
 class Session:
     def __init__(self, term_id):
-        self.RSSH_DIRNAME = 'rssh.%s' % term_id
-        self.RSSH_DIR = '/tmp/%s' % self.RSSH_DIRNAME
-        self.RSSH_PID_PATH = '%s/pid' % self.RSSH_DIR
-        self.RSSH_SOCK_PATH = '%s/auth.sock' % self.RSSH_DIR
-        self.RSSH_INPUT_PIPE_PATH = '%s/input' % self.RSSH_DIR
-        self.RSSH_OUTPUT_PIPE_PATH = '%s/output' % self.RSSH_DIR
+        self.RoSSH_DIRNAME = 'rossh.%s' % term_id
+        self.RoSSH_DIR = '/tmp/%s' % self.RoSSH_DIRNAME
+        self.RoSSH_PID_PATH = '%s/pid' % self.RoSSH_DIR
+        self.RoSSH_SOCK_PATH = '%s/auth.sock' % self.RoSSH_DIR
+        self.RoSSH_INPUT_PIPE_PATH = '%s/input' % self.RoSSH_DIR
+        self.RoSSH_OUTPUT_PIPE_PATH = '%s/output' % self.RoSSH_DIR
 
     def copy_to_daemon(self, master_fd):
-        f_input = open(self.RSSH_INPUT_PIPE_PATH, 'r')
+        f_input = open(self.RoSSH_INPUT_PIPE_PATH, 'r')
         f_input_fileno = f_input.fileno()
-        f_output = open(self.RSSH_OUTPUT_PIPE_PATH, 'w')
+        f_output = open(self.RoSSH_OUTPUT_PIPE_PATH, 'w')
         f_output_fileno = f_output.fileno()
 
         try:
@@ -101,7 +101,7 @@ class Session:
                         # reopen the pipe.
                         fds.remove(f_input_fileno)
                         f_input.close
-                        f_input = open(self.RSSH_INPUT_PIPE_PATH, 'r')
+                        f_input = open(self.RoSSH_INPUT_PIPE_PATH, 'r')
                         f_input_fileno = f_input.fileno()
                         fds.append(f_input_fileno)
                     else:
@@ -111,8 +111,8 @@ class Session:
             f_input.close()
 
     def create_session_daemon(self):
-        os.mkfifo(self.RSSH_INPUT_PIPE_PATH)
-        os.mkfifo(self.RSSH_OUTPUT_PIPE_PATH)
+        os.mkfifo(self.RoSSH_INPUT_PIPE_PATH)
+        os.mkfifo(self.RoSSH_OUTPUT_PIPE_PATH)
         
         child_pid = os.fork()
         if child_pid != 0:
@@ -121,11 +121,11 @@ class Session:
         # below runs in the session daemon, and exits.
         signal.signal(signal.SIGHUP, signal.SIG_IGN)
         if 'SSH_AUTH_SOCK' in os.environ:
-            os.environ['SSH_AUTH_SOCK'] = self.RSSH_SOCK_PATH
+            os.environ['SSH_AUTH_SOCK'] = self.RoSSH_SOCK_PATH
 
         # create the shell
         # FROM pty.spawn source code at https://github.com/python/cpython/blob/3.9/Lib/pty.py#L151
-        sys.stdout.write('[RSSH session] created a new shell.\n')
+        sys.stdout.write('[RoSSH session] created a new shell.\n')
 
         shell_pid, master_fd = pty.fork()
         if shell_pid == 0:
@@ -140,30 +140,32 @@ class Session:
         os.close(master_fd)
         retv = os.waitpid(shell_pid, 0)[1]
 
-        sys.stdout.write('[RSSH session] shell exited with status %d.\n' % retv)
+        sys.stdout.write('[RoSSH session] shell exited with status %d.\n' % retv)
         sys.exit(0)
 
     def create_if_not_exists(self):
-        if os.path.exists(self.RSSH_DIR):
+        if os.path.exists(self.RoSSH_DIR):
             return
-        os.mkdir(self.RSSH_DIR, 0o700)
+        os.mkdir(self.RoSSH_DIR, 0o700)
         self.create_session_daemon()
 
     def attach(self):
-        rssh_input = open(self.RSSH_INPUT_PIPE_PATH, 'w')
+        rssh_input = open(self.RoSSH_INPUT_PIPE_PATH, 'w')
         rssh_input_fileno = rssh_input.fileno()
-        rssh_output = open(self.RSSH_OUTPUT_PIPE_PATH, 'r')
+        rssh_output = open(self.RoSSH_OUTPUT_PIPE_PATH, 'r')
         rssh_output_fileno = rssh_output.fileno()
         stdin_fileno = sys.stdin.fileno()
         stdout_fileno = sys.stdout.fileno()
 
-        def sighandler_winch(signum, frame):
+        def resize_window():
             window_size = fcntl.ioctl(stdin_fileno, termios.TIOCGWINSZ, '00000000')
             os.write(rssh_input_fileno, build_ctlseq(b'WS', window_size))
 
-        signal.signal(signal.SIGWINCH, sighandler_winch)
+        signal.signal(signal.SIGWINCH, lambda signum, frame: resize_window())
+        resize_window()
         
-        sys.stdout.write("[RSSH conn] connected to session\n")
+        sys.stdout.write("[RoSSH conn] connected to session\n")
+        sys.stdout.write(build_ctlseq(b'CONN:S'))
 
         with raw_tty():
             fds = [stdin_fileno, rssh_output_fileno]
@@ -174,7 +176,7 @@ class Session:
                 if stdin_fileno in rfds:
                     data = os.read(stdin_fileno, 1024)
                     if not data:
-                        sys.stdout.write("[RSSH conn] unexpected input EOF\n")
+                        sys.stdout.write("[RoSSH conn] unexpected input EOF\n")
                         sys.exit(1)
                     else:
                         write_to(rssh_input_fileno, data)
@@ -188,9 +190,10 @@ class Session:
                         write_to(stdout_fileno, data)
 
         # session terminated. cleanup.
-        shutil.rmtree(self.RSSH_DIR)
+        shutil.rmtree(self.RoSSH_DIR)
         
-        sys.stdout.write("[RSSH conn] session exited\n")
+        sys.stdout.write("[RoSSH conn] session exited\n")
+        sys.stdout.write(build_ctlseq(b'CONN:E'))
 
 if __name__ == '__main__':
     args = parser.parse_args()
@@ -200,9 +203,9 @@ if __name__ == '__main__':
     
     if 'SSH_AUTH_SOCK' in os.environ:
         try:
-            os.unlink(sess.RSSH_SOCK_PATH)
+            os.unlink(sess.RoSSH_SOCK_PATH)
         except FileNotFoundError:
             pass
-        os.symlink(os.environ['SSH_AUTH_SOCK'], sess.RSSH_SOCK_PATH)
+        os.symlink(os.environ['SSH_AUTH_SOCK'], sess.RoSSH_SOCK_PATH)
 
     sess.attach()
