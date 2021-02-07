@@ -14,7 +14,7 @@ import signal
 import random
 import string
 
-rossh_version_index = 1
+rossh_version_index = 2
 
 def gen_term_id():
     chars = string.ascii_uppercase + string.ascii_lowercase + string.digits
@@ -46,6 +46,14 @@ def write_to_master_fd(master_fd, data):
         data = data[n:]
 
 @contextlib.contextmanager
+def change_signal(signum, handler):
+    old_signal = signal.signal(signum, handler)
+    try:
+        yield
+    finally:
+        signal.signal(signum, old_signal)
+
+@contextlib.contextmanager
 def forward_window_resize(input_fileno, indirect):
     '''
     Listen for window size change (SIGWINCH) and forward it
@@ -60,16 +68,13 @@ def forward_window_resize(input_fileno, indirect):
             os.write(input_fileno, build_ctlseq(b'WS', window_size))
         else:
             fcntl.ioctl(input_fileno, termios.TIOCSWINSZ, window_size)
+            
     def new_signal_handler(signum, frame):
         resize_window()
 
-    old_signal_handler = signal.signal(signal.SIGWINCH, new_signal_handler)
-    resize_window()
-
-    try:
+    with change_signal(signal.SIGWINCH, new_signal_handler):
+        resize_window()
         yield
-    finally:
-        signal.signal(signal.SIGWINCH, old_signal_handler)
 
 @contextlib.contextmanager
 def raw_tty():
@@ -86,3 +91,6 @@ def raw_tty():
     finally:
         if restore:
             tty.tcsetattr(STDIN_FILENO, tty.TCSAFLUSH, mode)
+
+def lock_fd(fd):
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)

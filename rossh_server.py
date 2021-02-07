@@ -20,6 +20,7 @@ from rossh_common import \
     build_ctlseq, \
     write_to, \
     write_to_master_fd, \
+    change_signal, \
     forward_window_resize, \
     raw_tty
 
@@ -32,6 +33,8 @@ parser.add_argument('-V', dest='client_version', type=int, default=0,
                     help='Check that the server version is greater than the client version specified.')
 parser.add_argument('-t', dest='term', type=str, required=True,
                     help='Terminal id to create or attach to.')
+parser.add_argument('--kill', type=str, nargs='*',
+                    help='Id of orphaned terminals to kill')
 
 class Session:
     def __init__(self, term_id):
@@ -100,13 +103,19 @@ class Session:
 
         shell_pid, master_fd = pty.fork()
         if shell_pid == 0:
+            signal.signal(signal.SIGHUP, signal.SIG_DFL)
             signal.signal(signal.SIGINT, signal.SIG_DFL)
             os.execvp(SHELL, [SHELL])
 
-        try:
-            self.copy_to_daemon(master_fd)
-        except OSError:
-            pass
+        def sigterm_handler(signum, frame):
+            os.kill(shell_pid, signal.SIGHUP)
+            raise OSError('External termination received')
+            
+        with change_signal(signal.SIGTERM, sigterm_handler):
+            try:
+                self.copy_to_daemon(master_fd)
+            except OSError:
+                pass
 
         os.close(master_fd)
         retv = os.waitpid(shell_pid, 0)[1]
@@ -132,7 +141,10 @@ class Session:
             f.write(str(os.getpid()))
 
         def onhup_delpid(signum, frame):
-            os.unlink(self.RoSSH_CONN_PID_PATH)
+            try:
+                os.unlink(self.RoSSH_CONN_PID_PATH)
+            except FileNotFoundError:
+                pass
             sys.stdout.write('\r[RoSSH conn] SIGHUP\r\n')
             sys.exit(1)
 
@@ -176,15 +188,41 @@ class Session:
         write_to(stdout_fileno, build_ctlseq(b'CONN:E'))
         sys.stdout.write("[RoSSH conn] session exited\n")
 
+    def destroy_if_exists(self):
+        if os.path.exists(self.RoSSH_DIR):
+            if os.path.exists(self.RoSSH_CONN_PID_PATH):
+                # kill the previous connection.
+                with open(self.RoSSH_CONN_PID_PATH) as f:
+                    old_pid = int(f.read())
+
+                os.kill(old_pid, signal.SIGHUP)
+
+            if os.path.exists(self.RoSSH_SESS_PID_PATH):
+                # kill the session
+                with open(self.RoSSH_SESS_PID_PATH) as f:
+                    old_pid = int(f.read())
+
+                os.kill(old_pid, signal.SIGTERM)
+
+            shutil.rmtree(self.RoSSH_DIR)
+            return True
+        
+        else:
+            return False
+
 if __name__ == '__main__':
     args = parser.parse_args()
     
     if rossh_version_index < args.client_version:
-        print('\x1b+CONN:FL:VER')
+        print('\x1b+CONN:FL:VER', flush=True)
         sys.exit(1)
+
+    for oid in (args.kill or []):
+        sess = Session(oid)
+        if sess.destroy_if_exists():
+            print('\x1b+KILL[%s]' % oid, flush=True)
     
     sess = Session(args.term)
-
     sess.create_if_not_exists()
     
     if 'SSH_AUTH_SOCK' in os.environ:

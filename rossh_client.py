@@ -20,7 +20,8 @@ from rossh_common import \
     write_to, \
     write_to_master_fd, \
     forward_window_resize, \
-    raw_tty
+    raw_tty, \
+    lock_fd
 
 banner = '''\
    ___       __________ __
@@ -32,11 +33,29 @@ Robost SSH (RoSSH) version 1.0 by Zizheng Guo
 GPL License.
 '''
 
+curdir = os.path.dirname(os.path.abspath(__file__))
 stdin_fileno = sys.stdin.fileno()
 stdout_fileno = sys.stdout.fileno()
 
 class ConnectionError(Exception):
     pass
+
+def arg_orphaned_sessions():
+    ret = []
+    for fname in os.listdir(curdir):
+        if fname[:8] == '.orphan.':
+            locked = False
+            try:
+                with open(os.path.join(curdir, fname)) as f:
+                    lock_fd(f)
+            except OSError:
+                # print('file %s locked' % fname)
+                locked = True
+            if not locked: ret.append(fname[8:])
+    if ret:
+        return ' --kill ' + ' '.join(ret)
+    else:
+        return ''
 
 class ClientSession:
     def __init__(self, term_id, args):
@@ -93,7 +112,6 @@ class ClientSession:
                         run_cmd(b'chmod go-w ~/.rossh')
                         run_cmd(b'cd ~/.rossh')
 
-                        curdir = os.path.dirname(os.path.abspath(__file__))
                         for fname in ['rossh_client.py', 'rossh_server.py', 'rossh_common.py']:
                             run_cmd(b'rm ' + bytes(fname, encoding='utf-8'))
                             with open(os.path.join(curdir, fname), 'rb') as f:
@@ -111,8 +129,21 @@ class ClientSession:
                     # It would be a good exam problem to ask: why must we separate the /usr/ with bin/env?
                     # (Hint: consider remote echo of this file when installing)
                     if data.find(b'/usr/' + b'bin/env:') >= 0 and data.find(b'No such file or directory') >= 0:
-                        print('[RoSSH] No Python 3 found at remote server. You must install one to use RoSSH.')
+                        print('[RoSSH] No Python 3 found at remote server. You must install one to use RoSSH.\r')
                         raise ConnectionError('No python 3 found.')
+
+                    while data.find(b'\x1b+KILL[') >= 0:
+                        t = data.find(b'\x1b+KILL[')
+                        data = data[t + len(b'\x1b+KILL['):]
+                        t = data.find(b']')
+                        if t < 0: raise RuntimeError('Incomplete Killed info')
+                        killed_term_id = data[:t].decode('utf-8')
+                        print('[RoSSH] killed orphaned session %s\r' % killed_term_id)
+                        try:
+                            os.unlink(os.path.join(curdir, '.orphan.%s' % killed_term_id))
+                        except Exception as e:
+                            print(e, '\r')
+                        data = data[t + 1:]
 
                     if data.find(b'\x1b+CONN:S') >= 0:
                         write_to(stdout_fileno, data[data.find(b'\x1b+CONN:S') + len(b'\x1b+CONN:S'):])
@@ -127,8 +158,8 @@ class ClientSession:
     def connect(self):
         args = self.args + \
                ['-t',
-                '(echo -e "\\x1b+SSHOK" && ~/.rossh/rossh_server.py -V %d -t %s) || (echo -e "\\x1b+CONN:FL:CLI" && /bin/bash)' % \
-                (rossh_version_index, self.term_id)]
+                '(echo -e "\\x1b+SSHOK" && ~/.rossh/rossh_server.py -V %d -t %s %s) || (echo -e "\\x1b+CONN:FL:CLI" && /bin/bash)' % \
+                (rossh_version_index, self.term_id, arg_orphaned_sessions())]
         print('[RoSSH] Connecting to: ' + ' '.join(self.args) + ' -t <rossh_server>')
         ssh_pid, master_fd = pty.fork()
         if ssh_pid == 0:
@@ -176,7 +207,10 @@ class ClientSession:
                         return
                 continue
 
-            session_created = True
+            if not session_created:
+                session_created = True
+                f_session_orphan = open(os.path.join(curdir, '.orphan.%s' % self.term_id), 'w')
+                lock_fd(f_session_orphan)
 
             try:
                 with raw_tty(), forward_window_resize(master_fd, indirect=False):
@@ -201,6 +235,8 @@ class ClientSession:
 
                             if data.find(b'\x1b+CONN:E') >= 0:
                                 write_to(stdout_fileno, data[:data.find(b'\x1b+CONN:E')])
+                                f_session_orphan.close()
+                                os.unlink(os.path.join(curdir, '.orphan.%s' % self.term_id))
                                 # print('\r[RoSSH] Exited gracefully.\r')
                                 return
 
