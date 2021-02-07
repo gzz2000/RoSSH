@@ -44,6 +44,6 @@ fi
 
 mkdir -p $HOME/.local/bin
 ln -fs $local/rossh $HOME/.local/bin
-echo "Done. Please add the following line to your .bashrc:"
+echo "Done. Please add the following line to your .bashrc, and then relogin to use RoSSH:"
 echo ""
 echo "export PATH=\"\$PATH:$HOME/.local/bin\""
