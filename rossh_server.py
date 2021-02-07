@@ -96,6 +96,7 @@ class Session:
 
         shell_pid, master_fd = pty.fork()
         if shell_pid == 0:
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
             os.execvp(SHELL, [SHELL])
 
         try:
