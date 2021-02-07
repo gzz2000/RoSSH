@@ -16,6 +16,7 @@ import shutil
 import atexit
 
 from rossh_common import \
+    rossh_version_index, \
     build_ctlseq, \
     write_to, \
     write_to_master_fd, \
@@ -26,8 +27,11 @@ SHELL = os.environ.get('SHELL', 'sh')
 
 parser = argparse.ArgumentParser(
     description='RoSSH server script that creates and manages shells behind pseudo terminals.')
+
+parser.add_argument('-V', dest='client_version', type=int, default=0,
+                    help='Check that the server version is greater than the client version specified.')
 parser.add_argument('-t', dest='term', type=str, required=True,
-                    help='Terminal id to create or attach to')
+                    help='Terminal id to create or attach to.')
 
 class Session:
     def __init__(self, term_id):
@@ -174,6 +178,11 @@ class Session:
 
 if __name__ == '__main__':
     args = parser.parse_args()
+    
+    if rossh_version_index < args.client_version:
+        print('\x1b+CONN:FL:VER')
+        sys.exit(1)
+    
     sess = Session(args.term)
 
     sess.create_if_not_exists()

@@ -14,6 +14,8 @@ import signal
 import random
 import string
 
+rossh_version_index = 1
+
 def gen_term_id():
     chars = string.ascii_uppercase + string.ascii_lowercase + string.digits
     return ''.join(random.choice(chars) for _ in range(16))

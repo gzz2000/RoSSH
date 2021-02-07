@@ -14,6 +14,7 @@ import signal
 import time
 
 from rossh_common import \
+    rossh_version_index, \
     gen_term_id, \
     write_to, \
     write_to_master_fd, \
@@ -45,6 +46,7 @@ class ClientSession:
         with raw_tty():
             fds = [master_fd, stdin_fileno]
             ssh_established = False
+            server_old_version = False
             
             while True:
                 rfds, _, _ = select.select(fds, [], [])
@@ -64,9 +66,15 @@ class ClientSession:
 
                     if not ssh_established:
                         write_to(stdout_fileno, data)
+
+                    if data.find(b'\x1b+CONN:FL:VER') >= 0:
+                        server_old_version = True
                         
                     if data.find(b'\x1b+CONN:FL:CLI') >= 0:
-                        print('[RoSSH] Copying RoSSH to remote server ~/.rossh ...\r')
+                        if server_old_version:
+                            print('[RoSSH] Updating RoSSH at remote server ...\r')
+                        else:
+                            print('[RoSSH] Copying RoSSH to remote server ~/.rossh ...\r')
                         write_to(master_fd, b'mkdir -p ~/.rossh\n')
                         write_to(master_fd, b'chmod go-w ~/.rossh\n')
                         write_to(master_fd, b'cd ~/.rossh\n')
@@ -99,7 +107,10 @@ class ClientSession:
                         write_to(master_fd, data)
 
     def connect(self):
-        args = self.args + ['-t', '(echo -e "\x1b+SSHOK" && ~/.rossh/rossh_server.py -t %s) || (echo -e "\x1b+CONN:FL:CLI" && /bin/bash)' % self.term_id]
+        args = self.args + \
+               ['-t',
+                '(echo -e "\x1b+SSHOK" && ~/.rossh/rossh_server.py -V %d -t %s) || (echo -e "\x1b+CONN:FL:CLI" && /bin/bash)' % \
+                (rossh_version_index, self.term_id)]
         print('[RoSSH] Connecting to: ' + ' '.join(self.args) + ' -t <rossh_server>')
         ssh_pid, master_fd = pty.fork()
         if ssh_pid == 0:
