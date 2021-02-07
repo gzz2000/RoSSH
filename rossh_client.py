@@ -12,6 +12,7 @@ import pty
 import select
 import signal
 import time
+import base64
 
 from rossh_common import \
     rossh_version_index, \
@@ -75,20 +76,37 @@ class ClientSession:
                             print('[RoSSH] Updating RoSSH at remote server ...\r')
                         else:
                             print('[RoSSH] Copying RoSSH to remote server ~/.rossh ...\r')
-                        write_to(master_fd, b'mkdir -p ~/.rossh\n')
-                        write_to(master_fd, b'chmod go-w ~/.rossh\n')
-                        write_to(master_fd, b'cd ~/.rossh\n')
+
+                        def run_cmd(cmd):
+                            write_to(master_fd, cmd + b'; echo -e "\\x1b+CMDOK"\n')
+                            # print('\rRUN_CMD:', cmd + b'; echo -e "\\x1b+CMDOK"\n')
+                            while True:
+                                data = os.read(master_fd, 4096)
+                                # print('\rMASTER_DATA:', data)
+                                if not data:
+                                    raise RuntimeError('Unexpected EOF running command')
+                                if data.find(b'\x1b+CMDOK') >= 0:
+                                    break
+
+                        # instructions = bytes()
+                        run_cmd(b'mkdir -p ~/.rossh')
+                        run_cmd(b'chmod go-w ~/.rossh')
+                        run_cmd(b'cd ~/.rossh')
 
                         curdir = os.path.dirname(os.path.abspath(__file__))
                         for fname in ['rossh_client.py', 'rossh_server.py', 'rossh_common.py']:
-                            write_to(master_fd, b'cat <<EOF > ' + bytes(fname, encoding='utf-8') + b'\n')
+                            run_cmd(b'rm ' + bytes(fname, encoding='utf-8'))
                             with open(os.path.join(curdir, fname), 'rb') as f:
-                                write_to(master_fd, f.read())
-                            write_to(master_fd, b'EOF\n')
+                                while True:
+                                    data = f.read(1023)
+                                    if not data:
+                                        break
+                                    run_cmd(b'echo "' + base64.b64encode(data) + b'" | base64 -d >> ' + bytes(fname, encoding='utf-8'))
 
-                        write_to(master_fd, b'chmod go-w,+x *\n')
-                        write_to(master_fd, b'cd ~\n')
-                        write_to(master_fd, bytes('~/.rossh/rossh_server.py -t %s\n' % self.term_id, encoding='utf-8'))
+                        run_cmd(b'chmod go-w,+x *')
+                        run_cmd(b'cd ~')
+                        write_to(master_fd, bytes('~/.rossh/rossh_server.py -t %s && history -c && exit\n' % self.term_id, encoding='utf-8'))
+                        # write_to(master_fd, instructions)
 
                     # It would be a good exam problem to ask: why must we separate the /usr/ with bin/env?
                     # (Hint: consider remote echo of this file when installing)
@@ -109,7 +127,7 @@ class ClientSession:
     def connect(self):
         args = self.args + \
                ['-t',
-                '(echo -e "\x1b+SSHOK" && ~/.rossh/rossh_server.py -V %d -t %s) || (echo -e "\x1b+CONN:FL:CLI" && /bin/bash)' % \
+                '(echo -e "\\x1b+SSHOK" && ~/.rossh/rossh_server.py -V %d -t %s) || (echo -e "\\x1b+CONN:FL:CLI" && /bin/bash)' % \
                 (rossh_version_index, self.term_id)]
         print('[RoSSH] Connecting to: ' + ' '.join(self.args) + ' -t <rossh_server>')
         ssh_pid, master_fd = pty.fork()
