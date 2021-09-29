@@ -14,7 +14,7 @@ import signal
 import random
 import string
 
-rossh_version_index = 2
+rossh_version_index = 3
 
 def gen_term_id():
     chars = string.ascii_uppercase + string.ascii_lowercase + string.digits

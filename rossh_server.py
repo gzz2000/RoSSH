@@ -195,14 +195,18 @@ class Session:
                 with open(self.RoSSH_CONN_PID_PATH) as f:
                     old_pid = int(f.read())
 
-                os.kill(old_pid, signal.SIGHUP)
+                try:
+                    os.kill(old_pid, signal.SIGHUP)
+                except ProcessLookupError: pass
 
             if os.path.exists(self.RoSSH_SESS_PID_PATH):
                 # kill the session
                 with open(self.RoSSH_SESS_PID_PATH) as f:
                     old_pid = int(f.read())
 
-                os.kill(old_pid, signal.SIGTERM)
+                try:
+                    os.kill(old_pid, signal.SIGTERM)
+                except ProcessLookupError: pass
 
             shutil.rmtree(self.RoSSH_DIR)
             return True
