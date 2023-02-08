@@ -14,16 +14,45 @@ import signal
 import random
 import string
 
-rossh_version_index = 3
+rossh_version_index = 4
+
+ctlseq_special = 'rossh_173e6793-122c'
+ctlseq_begin = b'BC'
+ctlseq_end = b'ECrossh'
 
 def gen_term_id():
     chars = string.ascii_uppercase + string.ascii_lowercase + string.digits
     return ''.join(random.choice(chars) for _ in range(16))
 
-def build_ctlseq(*args):
-    ret = b'\x1b+'
+def to_bytes(s):
+    if isinstance(s, str):
+        return bytes(s, encoding='utf-8')
+    else:
+        return bytes(s)
+
+def find_ctlseq_param(data, *args, output_str=False):
+    begin = ctlseq_begin + to_bytes(ctlseq_special)
     for a in args:
-        ret += bytes(a)
+        begin += to_bytes(a)
+    st = data.find(begin)
+    if st < 0:
+        return None, None
+    data = data[st + len(begin):]
+    ed = data.find(ctlseq_end)
+    if ed < 0:
+        raise RuntimeError('incomplete ctlseq param for %r' % args)
+    ret = data[:ed]
+    if output_str:
+        ret = ret.decode('utf-8')
+    return ret, data[ed + len(ctlseq_end):]
+
+def build_ctlseq(*args, output_str=False):
+    ret = ctlseq_begin + to_bytes(ctlseq_special)
+    for a in args:
+        ret += to_bytes(a)
+    ret += ctlseq_end
+    if output_str:
+        ret = ret.decode('utf-8')
     return ret
 
 def write_to(fd, data):
@@ -35,12 +64,12 @@ def write_to_master_fd(master_fd, data):
     '''
     Write all data to master_fd
     Interpret our special control characters, currently only:
-    \x1b + WS <8 bytes struct winsize>: change window size
+    WS + <8 bytes struct winsize>: change window size
     '''
-    if len(data) >= 12 and data[0:4] == b'\x1b+WS':
-        ws = data[4:12]
+    ws, remain_data = find_ctlseq_param(data, 'WS')
+    if ws is not None:
         fcntl.ioctl(master_fd, termios.TIOCSWINSZ, ws)
-        data = data[12:]
+        data = remain_data
     while data:
         n = os.write(master_fd, data)
         data = data[n:]
@@ -58,7 +87,7 @@ def forward_window_resize(input_fileno, indirect):
     '''
     Listen for window size change (SIGWINCH) and forward it
     to the terminal at input_fileno.
-    If indirect is True, we send \x1b+WS to input_fileno.
+    If indirect is True, we send WS command to input_fileno.
     Otherwise, we set window size of input_fileno directly.
     '''
     stdin_fileno = sys.stdin.fileno()
@@ -94,3 +123,23 @@ def raw_tty():
 
 def lock_fd(fd):
     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+# used to detect patterns that are split into two consecutive packets.
+class PatternFinder:
+    def __init__(self):
+        self.tail_buf = bytes()
+        self.BUFLEN = 100  # should be longer than the largest pattern
+
+    def append(self, data):
+        self.tail_buf = (self.tail_buf + data)[-self.BUFLEN:]
+
+    def find_with_tail(self, data, pattern):
+        assert len(pattern) >= 2
+        assert len(pattern) < self.BUFLEN
+        tail_head_len = min(len(pattern) - 1, len(self.tail_buf))
+        p = (self.tail_buf[-(len(pattern) - 1):] + data).find(pattern)
+        if p < 0:
+            return None
+        before = data[:p - tail_head_len] if p >= tail_head_len else b''
+        after = data[p + len(pattern) - tail_head_len:]
+        return (before, after)

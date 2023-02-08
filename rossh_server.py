@@ -71,7 +71,7 @@ class Session:
                         # has broken and would reconnect later. so we just
                         # reopen the pipe.
                         fds.remove(f_input_fileno)
-                        f_input.close
+                        f_input.close()
                         f_input = open(self.RoSSH_INPUT_PIPE_PATH, 'r')
                         f_input_fileno = f_input.fileno()
                         fds.append(f_input_fileno)
@@ -99,7 +99,8 @@ class Session:
 
         # create the shell
         # FROM pty.spawn source code at https://github.com/python/cpython/blob/3.9/Lib/pty.py#L151
-        sys.stdout.write('[RoSSH session] created a new shell.\n')
+        sys.stdout.write('[RoSSH session] created a new shell: ' +
+                         SHELL + '.\n')
 
         shell_pid, master_fd = pty.fork()
         if shell_pid == 0:
@@ -119,6 +120,7 @@ class Session:
 
         os.close(master_fd)
         retv = os.waitpid(shell_pid, 0)[1]
+        # print('[RoSSH debug] shell exited.')
 
         # sys.stdout.write('\r[RoSSH session] shell exited with status %d.\r\n' % retv)
         sys.exit(0)
@@ -218,13 +220,19 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     if rossh_version_index < args.client_version:
-        print('\x1b+CONN:FL:VER', flush=True)
+        print(build_ctlseq('CONN:FL:VER:SERVER_UPDATE', output_str=True),
+              flush=True)
+        sys.exit(1)
+    if rossh_version_index > args.client_version:
+        print(build_ctlseq('CONN:FL:VER:CLIENT_TOOOLD', output_str=True),
+              flush=True)
         sys.exit(1)
 
     for oid in (args.kill or []):
         sess = Session(oid)
         if sess.destroy_if_exists():
-            print('\x1b+KILL[%s]' % oid, flush=True)
+            print(build_ctlseq('KILLed:', oid, output_str=True),
+                  flush=True)
     
     sess = Session(args.term)
     sess.create_if_not_exists()
