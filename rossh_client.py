@@ -312,28 +312,36 @@ class ClientSession:
                           e)
                     return
             if master_fd is None:
-                print('[RoSSH] Press any key to retry. '
-                      'Ctrl-C to give up.')
-                with raw_tty():
-                    data = os.read(stdin_fileno, 1024)
-                if data == b'\x03':
-                    if session_created:
-                        print('[RoSSH] You will not be able '
-                              'to reconnect to this session. '
-                              'Proceed? (y/n)')
-                        with raw_tty():
-                            while True:
-                                data = os.read(stdin_fileno, 1024)
-                                if data in [b'y', b'n', b'Y', b'N']:
-                                    break
-                        if data in [b'y', b'Y']:
-                            print('[RoSSH] The orphaned remote '
-                                  'session would be killed the '
-                                  'next time you log into this '
-                                  'server from this client.')
+                print('[RoSSH] Press any key to reconnect. '
+                      'Ctrl-C to give up. Ctrl-G to toggle debug.')
+                while True:
+                    with raw_tty():
+                        data = os.read(stdin_fileno, 1024)
+                    if data == b'\x03':
+                        if session_created:
+                            print('[RoSSH] You will not be able '
+                                  'to reconnect to this session. '
+                                  'Proceed? (y/n)')
+                            with raw_tty():
+                                while True:
+                                    data = os.read(stdin_fileno, 1024)
+                                    if data in [b'y', b'n', b'Y', b'N']:
+                                        break
+                                if data in [b'y', b'Y']:
+                                    print('[RoSSH] The orphaned remote '
+                                          'session would be killed the '
+                                          'next time you log into this '
+                                          'server from this client.')
+                                    return
+                        else:
                             return
+                    elif data == b'\x07':
+                        global is_debug
+                        is_debug = not is_debug
+                        print('[RoSSH] debug = %r. ' % is_debug +
+                              'Press any key to reconnect.')
                     else:
-                        return
+                        break
                 continue
 
             if not session_created:

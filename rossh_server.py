@@ -109,7 +109,10 @@ class Session:
             os.execvp(SHELL, [SHELL])
 
         def sigterm_handler(signum, frame):
-            os.kill(shell_pid, signal.SIGHUP)
+            try:
+                os.kill(shell_pid, signal.SIGHUP)
+            except ProcessLookupError:
+                pass
             raise OSError('External termination received')
             
         with change_signal(signal.SIGTERM, sigterm_handler):
@@ -136,8 +139,11 @@ class Session:
             # kill the previous connection.
             with open(self.RoSSH_CONN_PID_PATH) as f:
                 old_pid = int(f.read())
-                
-            os.kill(old_pid, signal.SIGINT)    # different from SIGHUP to avoid file remove race condition
+            try:
+                # different from SIGHUP to avoid file remove race condition
+                os.kill(old_pid, signal.SIGINT)
+            except ProcessLookupError:
+                pass
 
         with open(self.RoSSH_CONN_PID_PATH, 'w') as f:
             f.write(str(os.getpid()))
