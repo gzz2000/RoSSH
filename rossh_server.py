@@ -22,7 +22,8 @@ from rossh_common import \
     write_to_master_fd, \
     change_signal, \
     forward_window_resize, \
-    raw_tty
+    raw_tty, \
+    set_sync_output
 
 SHELL = os.environ.get('SHELL', 'sh')
 
@@ -164,6 +165,7 @@ class Session:
         rssh_output_fileno = rssh_output.fileno()
         stdin_fileno = sys.stdin.fileno()
         stdout_fileno = sys.stdout.fileno()
+        set_sync_output(stdout_fileno)
         
         sys.stdout.write("[RoSSH conn] connected to session\n")
         write_to(stdout_fileno, build_ctlseq(b'CONN:S'))

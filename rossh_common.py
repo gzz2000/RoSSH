@@ -14,7 +14,7 @@ import signal
 import random
 import string
 
-rossh_version_index = 4
+rossh_version_index = 5
 
 ctlseq_special = 'rossh_173e6793-122c'
 ctlseq_begin = b'BC'
@@ -123,6 +123,11 @@ def raw_tty():
 
 def lock_fd(fd):
     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+def set_sync_output(fd):
+    fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+    fl |= os.O_SYNC
+    fcntl.fcntl(fd, fcntl.F_SETFL, fl)
 
 # used to detect patterns that are split into two consecutive packets.
 class PatternFinder:

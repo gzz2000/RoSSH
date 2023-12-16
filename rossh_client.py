@@ -32,7 +32,7 @@ banner = '''\
  / , _/ _ \_\ \_\ \/ _  /
 /_/|_|\___/___/___/_//_/
 
-Robost SSH (RoSSH) version ''' + str(rossh_version_index) + '''.
+Robust SSH (RoSSH) version ''' + str(rossh_version_index) + '''.
 Copyright (C) 2023 Zizheng Guo, released under GPL license.
 '''
 
@@ -116,7 +116,7 @@ class ClientSession:
                     os.environ['TERM']
                 write_to(
                     master_fd,
-                    b'(unset PS1 PS2 PS3 && env TERM=\'' +
+                    b' (unset PS1 PS2 PS3 && env TERM=\'' +
                     bytes(term_environ, encoding='utf-8') + \
                     b'\' ' +
                     bytes('~/.rossh/rossh_server.py -V %d -t %s %s' %
@@ -250,6 +250,7 @@ class ClientSession:
         args = self.args + \
                ['-t', 'exec', 'env',
                 'TERM=\'dumb\'',
+                'HISTCONTROL=\'ignoreboth\'',
                 'PS1=\'' + build_ctlseq('PROMPT', output_str=True) + '\'',
                 'PS2=\'\'',
                 'PS3=\'\'',
@@ -411,6 +412,9 @@ class ClientSession:
 
 if __name__ == '__main__':
     print(banner)
+    if len(sys.argv) == 1:
+        print('Usage: rossh <hostname> [..ssh options]')
+        exit(1)
     term_id = gen_term_id()
     args = [*sys.argv]
     args[0] = 'ssh'
