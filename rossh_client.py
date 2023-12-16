@@ -204,7 +204,7 @@ class ClientSession:
                         # this seems to be more robust.
                         def run_cmd(cmd):
                             assert b'\n' not in cmd
-                            write_to(master_fd, cmd + b'\n')
+                            write_to(master_fd, b' ' + cmd + b'\n')
                             while True:
                                 data = os.read(master_fd, 4096)
                                 if is_debug: write_to(stdout_fileno, b'{' + data + b'}')
